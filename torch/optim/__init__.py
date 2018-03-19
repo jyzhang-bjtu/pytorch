@@ -14,6 +14,7 @@ from .asgd import ASGD
 from .sgd import SGD
 from .rprop import Rprop
 from .rmsprop import RMSprop
+from .nadam import NAdam
 from .optimizer import Optimizer
 from .lbfgs import LBFGS
 from . import lr_scheduler
@@ -26,5 +27,6 @@ del asgd
 del sgd
 del rprop
 del rmsprop
+del nadam
 del optimizer
 del lbfgs

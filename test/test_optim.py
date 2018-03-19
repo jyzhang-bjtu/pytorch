@@ -254,13 +254,13 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
-
+        
     def test_sparse_adam(self):
         self._test_rosenbrock_sparse(
             lambda params: optim.SparseAdam(params, lr=4e-2),
             True
         )
-
+        
     def test_adadelta(self):
         self._test_rosenbrock(
             lambda params: optim.Adadelta(params),
@@ -415,7 +415,20 @@ class TestOptim(TestCase):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
 
-
+    def test_nadam(self):
+        self._test_rosenbrock(
+            lambda params: optim.NAdam(params, lr=1e-2),
+            wrap_old_fn(old_optim.adam, learningRate=1e-2)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
         super(SchedulerTestNet, self).__init__()
