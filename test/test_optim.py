@@ -12,6 +12,10 @@ from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
 from common import TestCase, run_tests
 
+import examples
+
+import pydevd
+# pydevd.settrace("192.168.1.216", port=5678)
 
 def rosenbrock(tensor):
     x, y = tensor
@@ -261,6 +265,20 @@ class TestOptim(TestCase):
             True
         )
         
+    def test_nadam(self):
+        self._test_rosenbrock(
+            lambda params: optim.NAdam(params, lr=1e-2),
+            wrap_old_fn(examples.nadam, learningRate=1e-2)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3)
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.NAdam(
+                self._build_params_dict(weight, bias, lr=1e-2),
+                lr=1e-3)
+        )
+        
     def test_adadelta(self):
         self._test_rosenbrock(
             lambda params: optim.Adadelta(params),
@@ -414,20 +432,6 @@ class TestOptim(TestCase):
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
             optim.SGD(Variable(torch.randn(5, 5)), lr=3)
-
-    def test_nadam(self):
-        self._test_rosenbrock(
-            lambda params: optim.NAdam(params, lr=1e-2),
-            wrap_old_fn(old_optim.adam, learningRate=1e-2)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.NAdam([weight, bias], lr=1e-3)
-        )
-        self._test_basic_cases(
-            lambda weight, bias: optim.NAdam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3)
-        )
         
 class SchedulerTestNet(torch.nn.Module):
     def __init__(self):
