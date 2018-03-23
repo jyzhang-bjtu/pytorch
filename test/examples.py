@@ -2030,7 +2030,7 @@ def nadam(opfunc, x, config, state=None):
     if 't' not in state:
         state['t'] = 0
     
-    x = torch.Tensor( para_t[state['t']] )
+    x.zero_().add_( torch.Tensor( para_t[state['t']] ) )
         
     state['t'] += 1
     

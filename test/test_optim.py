@@ -15,7 +15,7 @@ from common import TestCase, run_tests
 import examples
 
 import pydevd
-# pydevd.settrace("192.168.1.216", port=5678)
+pydevd.settrace("192.168.1.216", port=5678)
 
 def rosenbrock(tensor):
     x, y = tensor
@@ -266,6 +266,7 @@ class TestOptim(TestCase):
         )
         
     def test_nadam(self):
+        pydevd.settrace()
         self._test_rosenbrock(
             lambda params: optim.NAdam(params, lr=1e-2),
             wrap_old_fn(examples.nadam, learningRate=1e-2)
