@@ -1,8 +1,8 @@
 #pragma once
 
-#include "ATen/Tensor.h"
-#include "ATen/TensorGeometry.h"
-#include "ATen/Utils.h"
+#include <ATen/Tensor.h>
+#include <ATen/TensorGeometry.h>
+#include <ATen/Utils.h>
 
 // These functions are NOT in Utils.h, because this file has a dep on Tensor.h
 
@@ -12,7 +12,7 @@ namespace at {
 // make sense.  These are particularly useful for native functions,
 // which do NO argument checking by default.
 
-struct TensorArg {
+struct TORCH_API TensorArg {
   Tensor tensor;
   const char* name;
   int pos; // 1-indexed
@@ -22,7 +22,7 @@ struct TensorArg {
   const Tensor& operator*() const { return tensor; }
 };
 
-struct TensorGeometryArg {
+struct TORCH_API TensorGeometryArg {
   TensorGeometry tensor;
   const char* name;
   int pos; // 1-indexed
@@ -49,33 +49,106 @@ using CheckedFrom = const char*;
 // not TensorGeometryArg, because the Tensor to TensorGeometry
 // conversion will blow up if you have undefined tensors.
 
-std::ostream& operator<<(std::ostream & out, TensorGeometryArg t);
-void checkDim(CheckedFrom c, const TensorGeometryArg& t, int64_t dim);
+TORCH_API std::ostream& operator<<(std::ostream& out, TensorGeometryArg t);
+TORCH_API void checkDim(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim);
 // NB: this is an inclusive-exclusive range
-void checkDimRange(CheckedFrom c, const TensorGeometryArg& t, int64_t dim_start, int64_t dim_end);
-void checkSameDim(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
-void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
-void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntList sizes);
-void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t size);
-void checkNumel(CheckedFrom c, const TensorGeometryArg& t, int64_t numel);
-void checkSameNumel(CheckedFrom c, const TensorGeometryArg& t1, const TensorGeometryArg& t2);
-void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
-void checkScalarType(CheckedFrom c, const TensorArg& t, ScalarType s);
-void checkSameGPU(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
-void checkSameType(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors);
-void checkSameSize(CheckedFrom c, const TensorArg& t1, const TensorArg& t2);
-void checkDefined(CheckedFrom c, const TensorArg& t);
-void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
+TORCH_API void checkDimRange(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim_start,
+    int64_t dim_end);
+TORCH_API void checkSameDim(
+    CheckedFrom c,
+    const TensorGeometryArg& t1,
+    const TensorGeometryArg& t2);
+TORCH_API void checkContiguous(CheckedFrom c, const TensorGeometryArg& t);
+TORCH_API void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts);
+TORCH_API void checkSize(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    IntArrayRef sizes);
+TORCH_API void checkSize(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t dim,
+    int64_t size);
+TORCH_API void checkNumel(
+    CheckedFrom c,
+    const TensorGeometryArg& t,
+    int64_t numel);
+TORCH_API void checkSameNumel(
+    CheckedFrom c,
+    const TensorGeometryArg& t1,
+    const TensorGeometryArg& t2);
+TORCH_API void checkAllSameNumel(CheckedFrom c, ArrayRef<TensorArg> tensors);
+TORCH_API void checkScalarType(
+    CheckedFrom c,
+    const TensorArg& t,
+    ScalarType s);
+TORCH_API void checkScalarTypes(
+    CheckedFrom c,
+    const TensorArg& t,
+    at::ArrayRef<ScalarType> l);
+TORCH_API void checkSameGPU(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+TORCH_API void checkAllSameGPU(CheckedFrom c, ArrayRef<TensorArg> tensors);
+TORCH_API void checkSameType(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+TORCH_API void checkAllSameType(CheckedFrom c, ArrayRef<TensorArg> tensors);
+TORCH_API void checkSameSize(
+    CheckedFrom c,
+    const TensorArg& t1,
+    const TensorArg& t2);
+TORCH_API void checkDefined(CheckedFrom c, const TensorArg& t);
+TORCH_API void checkAllDefined(CheckedFrom c, at::ArrayRef<TensorArg> t);
 
 // FixMe: does TensorArg slow things down?
-void checkBackend(CheckedFrom c, at::ArrayRef<Tensor> t, at::Backend backend);
+TORCH_API void checkBackend(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> t,
+    at::Backend backend);
+
+TORCH_API void checkDeviceType(
+    CheckedFrom c,
+    at::ArrayRef<Tensor> tensors,
+    at::DeviceType device_type);
+
+TORCH_API void checkLayout(CheckedFrom c, const Tensor& t, Layout layout);
+
+TORCH_API void checkLayout(CheckedFrom c, at::ArrayRef<Tensor> tensors, at::Layout layout);
 
 // Methods for getting data_ptr if tensor is defined
-void * maybe_data_ptr(const Tensor& tensor);
-void * maybe_data_ptr(const TensorArg& tensor);
+TORCH_API void* maybe_data_ptr(const Tensor& tensor);
+TORCH_API void* maybe_data_ptr(const TensorArg& tensor);
 
-}
+// Return if the tensor geometry represented by `sizes` and `strides` is contiguous
+// Although we cache is_contiguous in tensor now, this is till useful because it
+// allows checking if a particular geometry is contiguous without explicitly
+// constructing a tensor, e.g., when you want to choose a kernel strategy based
+// on whether a subgeometry is contiguous.
+TORCH_API bool geometry_is_contiguous(IntArrayRef sizes, IntArrayRef strides);
 
+// Correspond to THCUNN_check_dim_size/THNN_check_dim_size
+TORCH_API void check_dim_size(
+    const Tensor& tensor,
+    int64_t dim,
+    int64_t dim_size,
+    int64_t size);
+
+namespace detail {
+TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
+TORCH_API size_t
+computeStorageNbytes(IntArrayRef sizes, IntArrayRef strides, size_t itemsize);
+TORCH_API c10::optional<std::vector<int64_t>> computeStride(
+    IntArrayRef oldshape,
+    IntArrayRef oldstride,
+    IntArrayRef newshape);
+} // namespace detail
+} // namespace at

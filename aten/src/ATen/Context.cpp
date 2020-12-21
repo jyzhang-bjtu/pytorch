@@ -1,63 +1,34 @@
-#include "ATen/Config.h"
+#include <ATen/Config.h>
 
-#include "Context.h"
+#include <ATen/Context.h>
 
-#include <thread>
+#include <c10/core/TensorOptions.h>
+#include <c10/core/CPUAllocator.h>
+
 #include <mutex>
 #include <sstream>
-#include <string>
 #include <stdexcept>
+#include <string>
+#include <thread>
 
-#if AT_CUDA_ENABLED()
-#include <cuda.h>
-#include "THC/THC.h"
-#include "ATen/CUDAGenerator.h"
-#endif
-#include "ATen/CPUGenerator.h"
+#include <ATen/Tensor.h>
+#include <ATen/cpu/FlushDenormal.h>
 
-#ifdef USE_SSE3
-#include <pmmintrin.h>
-#endif
+#include <TH/TH.h> // for USE_LAPACK
+
+#ifdef USE_FBGEMM
+#include <fbgemm/Fbgemm.h>
+#endif // USE_FBGEMM
 
 namespace at {
 
-static inline void errorHandler(const char * msg, void * data) {
-  throw std::runtime_error(msg);
-}
-static inline void argErrorHandler(int arg, const char * msg, void * data) {
-  std::stringstream new_error;
-  new_error << "invalid argument " << arg << ": " << msg;
-  throw std::runtime_error(new_error.str());
-}
-
 Context::Context()
-: thc_state(nullptr) {
+    : thc_state(nullptr, [](THCState* p) { /* no-op */ }),
+      thh_state(nullptr, [](THHState* p) { /* no-op */ }) {}
 
-  THSetDefaultErrorHandler(errorHandler,nullptr);
-  THSetDefaultArgErrorHandler(argErrorHandler,nullptr);
-
-  generator_registry[static_cast<int>(Backend::CPU)]
-    .reset(new CPUGenerator(this));
-  Type::registerAll(this);
-}
-void Context::doInitCUDA() {
-#if AT_CUDA_ENABLED()
-  thc_state = THCState_alloc();
-  THCState_setDeviceAllocator(thc_state, THCCachingAllocator_get());
-  thc_state->cudaHostAllocator = &THCCachingHostAllocator;
-  THCudaInit(thc_state);
-  generator_registry[static_cast<int>(Backend::CUDA)]
-    .reset(new CUDAGenerator(this));
-#endif
-}
-Context::~Context() {
-#if AT_CUDA_ENABLED()
-  if(thc_state)
-    THCState_free(thc_state);
-#endif
-}
-
-Context & globalContext() {
+// TODO: This could be bad juju if someone calls globalContext() in the
+// destructor of an object with static lifetime.
+Context& globalContext() {
   static Context globalContext_;
   return globalContext_;
 }
@@ -73,12 +44,82 @@ void Context::setUserEnabledCuDNN(bool e) {
   enabled_cudnn = e;
 }
 
+bool Context::userEnabledMkldnn() const {
+  return enabled_mkldnn;
+}
+
+void Context::setUserEnabledMkldnn(bool e) {
+  enabled_mkldnn = e;
+}
+
 bool Context::deterministicCuDNN() const {
   return deterministic_cudnn;
 }
 
 void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
+}
+
+bool Context::deterministic() const {
+  return _deterministic;
+}
+
+void Context::setDeterministic(bool b) {
+  if (b) {
+    TORCH_WARN_ONCE("torch.set_deterministic is in beta, and its design and "
+      " functionality may change in the future.");
+  }
+
+  _deterministic = b;
+}
+
+void Context::alertNotDeterministic(c10::string_view const& caller) {
+  if (globalContext().deterministic()) {
+    TORCH_CHECK(false,
+      caller, " does not have a deterministic implementation, but you set "
+      "'torch.set_deterministic(True)'. You can turn off determinism just "
+      "for this operation if that's acceptable for your application. You "
+      "can also file an issue at https://github.com/pytorch/pytorch/issues "
+      "to help us prioritize adding deterministic support for this operation.");
+  }
+}
+
+bool Context::allowTF32CuDNN() const {
+  return allow_tf32_cudnn;
+}
+
+void Context::setAllowTF32CuDNN(bool b) {
+  allow_tf32_cudnn = b;
+}
+
+static const char cublas_config_var_name[] = "CUBLAS_WORKSPACE_CONFIG";
+static const char* const cublas_deterministic_configs[] = { ":4096:8", ":16:8" };
+
+bool Context::checkCuBLASConfigDeterministic() {
+  bool cublas_config_deterministic = true;
+  // If using CUDA 10.2 or greater, need to make sure CuBLAS workspace config
+  // is set to deterministic setting
+  if (hasCUDART() && (versionCUDART() >= 10020)) {
+    char* workspace_config = std::getenv(cublas_config_var_name);
+    cublas_config_deterministic = (workspace_config != nullptr) && (
+      (strcmp(workspace_config, cublas_deterministic_configs[0]) == 0)
+      || (strcmp(workspace_config, cublas_deterministic_configs[1]) == 0)
+    );
+  }
+  return cublas_config_deterministic;
+}
+
+void Context::alertCuBLASConfigNotDeterministic() {
+  static bool cublas_config_deterministic = checkCuBLASConfigDeterministic();
+  TORCH_CHECK(!deterministic() || cublas_config_deterministic,
+    "Deterministic behavior was enabled with either `torch.set_deterministic(True)` or ",
+    "`at::Context::setDeterministic(true)`, but this operation is not deterministic because ",
+    "it uses CuBLAS and you have CUDA >= 10.2. To enable deterministic behavior in this ",
+    "case, you must set an environment variable before running your PyTorch application: ",
+    cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
+    cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
+    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
+  );
 }
 
 bool Context::benchmarkCuDNN() const {
@@ -89,55 +130,133 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
-bool Context::hasCUDA() const {
-#if AT_CUDA_ENABLED()
-  int count;
-  cudaError_t err = cudaGetDeviceCount(&count);
-  if (err == cudaErrorInsufficientDriver) {
-    return false;
-  }
+bool Context::allowTF32CuBLAS() const {
+  return allow_tf32_cublas;
+}
+
+void Context::setAllowTF32CuBLAS(bool b) {
+  allow_tf32_cublas = b;
+}
+
+bool Context::hasMKL() const {
+#if AT_MKL_ENABLED()
   return true;
 #else
   return false;
 #endif
 }
 
-#if AT_CUDA_ENABLED()
-cudaStream_t Context::getCurrentCUDAStream() const {
-  return THCState_getCurrentStream(thc_state);
-}
-struct cudaDeviceProp* Context::getCurrentDeviceProperties() const {
-  return THCState_getCurrentDeviceProperties(thc_state);
-}
-struct cudaDeviceProp* Context::getDeviceProperties(int device) const {
-  return THCState_getDeviceProperties(thc_state, device);
-}
+bool Context::hasMKLDNN() const {
+#if AT_MKLDNN_ENABLED()
+  return true;
+#else
+  return false;
 #endif
+}
 
-int64_t Context::current_device() const {
-#if AT_CUDA_ENABLED()
-  int device;
-  cudaError_t err = cudaGetDevice(&device);
-  if (err == cudaSuccess) {
-    return device;
-  }
+bool Context::hasOpenMP() const {
+#ifdef _OPENMP
+  return true;
+#else
+  return false;
 #endif
-  return -1;
+}
+
+bool Context::hasLAPACK() const {
+#ifdef USE_LAPACK
+  return true;
+#else
+  return false;
+#endif
+}
+
+at::QEngine Context::qEngine() const {
+  // If wasn't explicitly set - take the last one available
+  return quantized_engine.value_or(supportedQEngines().back());
+}
+
+void Context::setQEngine(at::QEngine e) {
+  const auto& qengines = supportedQEngines();
+  if (std::find(qengines.begin(), qengines.end(), e) != qengines.end()) {
+    quantized_engine = e;
+    return;
+  }
+  TORCH_CHECK(false, "quantized engine ", toString(e), " is not supported");
+}
+
+const std::vector<at::QEngine>& Context::supportedQEngines() const {
+  static auto supported_qengines = []() {
+    std::vector<at::QEngine> engines = {};
+    // Engines are listed in priority order: later one wins
+    // By default we prefer FBGEMM if we're running on server side
+    // QNNPACK on server side has some issue, so we disable it by default.
+#ifdef C10_MOBILE
+    engines.push_back(at::kNoQEngine);
+#ifdef USE_PYTORCH_QNNPACK
+    engines.push_back(at::kQNNPACK);
+#endif
+#else  // C10_MOBILE
+#ifdef USE_PYTORCH_QNNPACK
+    engines.push_back(at::kQNNPACK);
+#endif
+    engines.push_back(at::kNoQEngine);
+#endif // C10_MOBILE
+
+#ifdef USE_FBGEMM
+    if (fbgemm::fbgemmSupportedCPU()) {
+      engines.push_back(at::kFBGEMM);
+    }
+#endif
+    return engines;
+  }();
+  return supported_qengines;
+}
+
+bool Context::isXNNPACKAvailable() const {
+#ifdef USE_XNNPACK
+  return true;
+#else
+  return false;
+#endif
+}
+
+bool Context::releaseWeightsWhenPrepacking() const {
+  return release_original_weights;
+}
+
+void Context::setReleaseWeightsWhenPrepacking(bool e) {
+  release_original_weights = e;
 }
 
 bool Context::setFlushDenormal(bool on) {
-#ifdef USE_SSE3
-  // Setting flush-to-zero (FTZ) flag
-  _MM_SET_FLUSH_ZERO_MODE(on ? _MM_FLUSH_ZERO_ON
-                             : _MM_FLUSH_ZERO_OFF);
-
-  // Setting denormals-are-zero (DAZ) flag
-  _MM_SET_DENORMALS_ZERO_MODE(on ? _MM_DENORMALS_ZERO_ON
-                                 : _MM_DENORMALS_ZERO_OFF);
-  return true;
-#else
-  return false;
-#endif
+  return at::cpu::set_flush_denormal(on);
 }
 
+Allocator* getCPUAllocator() {
+  return c10::GetCPUAllocator();
 }
+
+// override_allow_tf32_flag = true
+//    means the allow_tf32 flags are overrided and tf32 is force disabled
+// override_allow_tf32_flag = false
+//    means the original allow_tf32 flags are followed
+thread_local bool override_allow_tf32_flag = false;
+
+NoTF32Guard::NoTF32Guard() {
+  if (!override_allow_tf32_flag) {
+    changed = true;
+    override_allow_tf32_flag = true;
+  }
+}
+
+NoTF32Guard::~NoTF32Guard() {
+  if (changed) {
+    override_allow_tf32_flag = false;
+  }
+}
+
+bool NoTF32Guard::should_disable_tf32() {
+  return override_allow_tf32_flag;
+}
+
+} // namespace at

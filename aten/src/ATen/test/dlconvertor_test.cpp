@@ -1,33 +1,32 @@
-#include "ATen/ATen.h"
-#include "ATen/DLConvertor.h"
+#include <gtest/gtest.h>
+
+#include <ATen/ATen.h>
+#include <ATen/DLConvertor.h>
 
 #include <iostream>
 #include <string.h>
 #include <sstream>
-#include "test_assert.h"
-#include "test_seed.h"
 
 using namespace at;
-
-static void test() {
-  {
-    std::cout << "dlconvertor: convert ATen to DLTensor" << std::endl;
-    Tensor a = rand(CPU(at::kFloat), {3,4});
-    std::cout << a.numel() << std::endl;
-    DLManagedTensor* dlMTensor = toDLPack(a);
-    std::cout << "dlconvertor: convert DLTensor to ATen" << std::endl;
-    Tensor b = fromDLPack(dlMTensor);
-    ASSERT(a.equal(b));
-    std::cout << "conversion was fine" << std::endl;
-  }
-
-}
-
-int main(int argc, char ** argv)
-{
+TEST(TestDlconvertor, TestDlconvertor) {
   manual_seed(123);
 
-  std::cout << "======================= CPU =====================" << std::endl;
-  test();
-  return 0;
+  Tensor a = rand({3, 4});
+  DLManagedTensor* dlMTensor = toDLPack(a);
+
+  Tensor b = fromDLPack(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
+}
+
+TEST(TestDlconvertor, TestDlconvertorNoStrides) {
+  manual_seed(123);
+
+  Tensor a = rand({3, 4});
+  DLManagedTensor* dlMTensor = toDLPack(a);
+  dlMTensor->dl_tensor.strides = nullptr;
+
+  Tensor b = fromDLPack(dlMTensor);
+
+  ASSERT_TRUE(a.equal(b));
 }

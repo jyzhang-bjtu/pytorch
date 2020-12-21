@@ -1,45 +1,43 @@
-#include "ATen/ATen.h"
-#include "test_assert.h"
-#include "test_seed.h"
+#include <gtest/gtest.h>
+
+#include <ATen/ATen.h>
 
 using namespace at;
+void TestSimpleCase(DeprecatedTypeProperties& T) {
+  auto a = randn({2, 3, 4, 5}, T);
+  ASSERT_TRUE(a.prod(-4).equal(a.prod(0)));
+  ASSERT_TRUE(a.prod(3).equal(a.prod(-1)));
+}
 
-int main() {
+void TestExpressionSpecification(DeprecatedTypeProperties& T) {
+  auto a = randn({2, 3, 4, 5}, T);
+  ASSERT_TRUE(a.unsqueeze(-5).equal(a.unsqueeze(0)));
+  ASSERT_TRUE(a.unsqueeze(4).equal(a.unsqueeze(-1)));
+
+  // can unsqueeze scalar
+  auto b = randn({}, T);
+  ASSERT_TRUE(b.unsqueeze(0).equal(b.unsqueeze(-1)));
+}
+
+void TestEmptyTensor(DeprecatedTypeProperties& T) {
+  auto a = randn(0, T);
+  ASSERT_TRUE(a.prod(0).equal(at::ones({}, T)));
+}
+
+void TestScalarVs1Dim1Size(DeprecatedTypeProperties& T) {
+  auto a = randn(1, T);
+  ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
+  a.resize_({});
+  ASSERT_EQ(a.dim(), 0);
+  ASSERT_TRUE(a.prod(0).equal(a.prod(-1)));
+}
+
+TEST(TestWrapdim, TestWrapdim) {
   manual_seed(123);
+  DeprecatedTypeProperties& T = CPU(kFloat);
 
-  Type & T = CPU(kFloat);
-
-  // test simple case
-  {
-    auto a = randn(T, {2, 3, 4, 5});
-    ASSERT(a.prod(-4).equal(a.prod(0)));
-    ASSERT(a.prod(3).equal(a.prod(-1)));
-  }
-
-  // test case with expression specification
-  {
-    auto a = randn(T, {2, 3, 4, 5});
-    ASSERT(a.unsqueeze(-5).equal(a.unsqueeze(0)));
-    ASSERT(a.unsqueeze(4).equal(a.unsqueeze(-1)));
-
-    // can unsqueeze scalar
-    auto b = randn(T, 1);
-    b.get()->maybeScalar(true);
-    ASSERT(b.unsqueeze(0).equal(b.unsqueeze(-1)));
-  }
-
-  // test case with empty tensor
-  {
-    auto a = randn(T, 0);
-    ASSERT_THROWS(a.prod(0));
-  }
-
-  // test case with scalar vs 1-dim, 1-size
-  {
-    auto a = randn(T, 1);
-    ASSERT(a.prod(0).equal(a.prod(-1)));
-    a.get()->maybeScalar(true);
-    ASSERT(a.get()->isScalar());
-    ASSERT(a.prod(0).equal(a.prod(-1)));
-  }
+  TestSimpleCase(T);
+  TestEmptyTensor(T);
+  TestScalarVs1Dim1Size(T);
+  TestExpressionSpecification(T);
 }

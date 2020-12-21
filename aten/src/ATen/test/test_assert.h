@@ -11,6 +11,10 @@ static inline void barf(const char *fmt, ...) {
   throw std::runtime_error(msg);
 }
 
+#if defined(_MSC_VER) && _MSC_VER <= 1900
+#define __func__ __FUNCTION__
+#endif
+
 #if defined(__GNUC__) || defined(__ICL) || defined(__clang__)
 #define AT_EXPECT(x, y) (__builtin_expect((x),(y)))
 #else
@@ -23,7 +27,7 @@ static inline void barf(const char *fmt, ...) {
   }
 
 //note: msg must be a string literal
-//node: In, ##__VA_ARGS '##' supresses the comma if __VA_ARGS__ is empty
+//node: In, ##__VA_ARGS '##' suppresses the comma if __VA_ARGS__ is empty
 #define ASSERTM(cond, msg, ...) \
   if (AT_EXPECT(!(cond), 0)) { \
     barf("%s:%u: %s: Assertion `%s` failed: " msg , __FILE__, __LINE__, __func__, #cond,##__VA_ARGS__); \
@@ -37,7 +41,7 @@ static inline void barf(const char *fmt, ...) {
       fn;                                                       \
       _passed = true;                                           \
       els;                                                      \
-    } catch (std::runtime_error &e) {                           \
+    } catch (const std::exception &e) {                         \
       ASSERT(!_passed);                                         \
       catc;                                                     \
     }                                                           \

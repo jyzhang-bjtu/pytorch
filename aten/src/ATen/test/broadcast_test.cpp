@@ -1,145 +1,186 @@
-#include "ATen/ATen.h"
-#include "test_assert.h"
-#include "test_seed.h"
+
+#include <gtest/gtest.h>
+
+#include <ATen/ATen.h>
 
 using namespace at;
 
-int main() {
+// can't expand empty tensor
+void TestEmptyTensor(DeprecatedTypeProperties& T) {
+  auto empty = randn({0}, T);
+  ASSERT_ANY_THROW(empty.expand({3}));
+}
+
+// out-place function with 2 args
+void TestOut2Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 1}, T);
+  auto b = randn({5}, T);
+  std::vector<int64_t> expanded_sizes = {3, 5};
+  ASSERT_TRUE(
+      (a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
+}
+
+// with scalar
+void TestOut2WithScalar(DeprecatedTypeProperties& T) {
+  auto aScalar = ones({}, T);
+  auto b = randn({3, 5}, T);
+  ASSERT_TRUE(
+      (aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
+}
+
+// old fallback behavior yields error
+void TestOut2OldFallback(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto b = randn({5, 3}, T);
+  ASSERT_ANY_THROW(a + b);
+}
+
+// with mismatched sizes
+void TestOut2MismatchedSizes(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto b = randn({7, 5}, T);
+  ASSERT_ANY_THROW(a + b);
+}
+
+// out-place function with 3 args
+void TestOut3Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 1, 1}, T);
+  auto b = randn({1, 2, 1}, T);
+  auto c = randn({1, 1, 5}, T);
+  std::vector<int64_t> expanded_sizes = {3, 2, 5};
+  ASSERT_TRUE((a + b + c).equal(
+      a.expand(expanded_sizes) + b.expand(expanded_sizes) +
+      c.expand(expanded_sizes)));
+}
+
+// with scalar
+void TestOut3WithScalar(DeprecatedTypeProperties& T) {
+  auto aTensorScalar = ones({}, T);
+  auto b = randn({3, 2, 1}, T);
+  auto c = randn({1, 2, 5}, T);
+  std::vector<int64_t> expanded_sizes = {3, 2, 5};
+  ASSERT_TRUE(aTensorScalar.addcmul(b, c).equal(
+      aTensorScalar.expand(expanded_sizes)
+          .addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
+}
+
+// old fallback behavior yields error
+void TestOut3OldFallback(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 2, 5}, T);
+  auto b = randn({2, 3, 5}, T);
+  auto c = randn({5, 3, 2}, T);
+  ASSERT_ANY_THROW(a.addcmul(b, c));
+}
+
+// with mismatched sizes
+void TestOut3MismatchedSizes(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 2, 5}, T);
+  auto b = randn({2, 3, 5}, T);
+  auto c = randn({5, 5, 5}, T);
+  ASSERT_ANY_THROW(a.addcmul(b, c));
+}
+
+// in-place function with 2 args
+void TestIn2Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto b = randn({3, 1}, T);
+  ASSERT_TRUE((a + b).equal(a + b.expand({3, 5})));
+}
+
+// with scalar
+void TestIn2WithScalar(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5}, T);
+  auto bScalar = ones({}, T);
+  ASSERT_TRUE((a + bScalar).equal(a + bScalar.expand(a.sizes())));
+}
+
+// error: would have to expand inplace arg
+void TestIn2ExpandError(DeprecatedTypeProperties& T) {
+  auto a = randn({1, 5}, T);
+  auto b = randn({3, 1}, T);
+  ASSERT_ANY_THROW(a.add_(b));
+}
+
+// in-place function with 3 args
+void TestIn3Basic(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5, 2}, T);
+  auto b = randn({3, 1, 2}, T);
+  auto c = randn({1, 5, 1}, T);
+  auto aClone = a.clone();
+  ASSERT_TRUE(a.addcmul_(b, c).equal(
+      aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
+}
+
+// with scalar
+void TestIn3WithScalar(DeprecatedTypeProperties& T) {
+  auto a = randn({3, 5, 2}, T);
+  auto b = randn({3, 1, 2}, T);
+  auto c = randn({1, 5, 1}, T);
+  auto aClone = a.clone();
+  auto bScalar = ones({}, T);
+  ASSERT_TRUE(a.addcmul_(bScalar, c)
+                  .equal(aClone.addcmul_(
+                      bScalar.expand(a.sizes()), c.expand(a.sizes()))));
+}
+
+// error: would have to expand inplace arg
+void TestIn3ExpandError(DeprecatedTypeProperties& T) {
+  auto a = randn({1, 3, 5}, T);
+  auto b = randn({4, 1, 1}, T);
+  auto c = randn({1, 3, 1}, T);
+  ASSERT_ANY_THROW(a.addcmul_(b, c));
+}
+
+// explicit dim specification
+void TestExplicitDimBasic(DeprecatedTypeProperties& T) {
+  auto a = randn({1}, T);
+  auto b = randn({5, 3}, T);
+  auto c = randn({3, 7}, T);
+  ASSERT_TRUE(a.addmm(b, c).equal(a.expand({5, 7}).addmm(b, c)));
+}
+
+// with scalar
+void TestExplicitDimWithScalar(DeprecatedTypeProperties& T) {
+  auto a = randn({1}, T);
+  auto b = randn({5, 3}, T);
+  auto c = randn({3, 7}, T);
+  Tensor aScalar = ones({}, T);
+  ASSERT_TRUE(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
+}
+
+// with mismatched sizes
+void TestExplicitDimWithMismatchedSizes(DeprecatedTypeProperties& T) {
+  auto b = randn({5, 3}, T);
+  auto c = randn({3, 7}, T);
+  auto a = randn({3, 3}, T);
+  ASSERT_ANY_THROW(a.addmm(b, c));
+}
+
+TEST(BroadcastTest, Broadcast) {
   manual_seed(123);
+  DeprecatedTypeProperties& T = CPU(kFloat);
 
-  Type & T = CPU(kFloat);
+  TestEmptyTensor(T);
 
-  // 0) pre-req tests:
-  // can't expand empty tensor
-  {
-    auto empty = randn(T, {0});
-    ASSERT_THROWS(empty.expand({3}));
-  }
+  TestOut2Basic(T);
+  TestOut2WithScalar(T);
+  TestOut2OldFallback(T);
+  TestOut2MismatchedSizes(T);
 
-  // 1) out-place function with 2 args
-  {
-    // basic
-    auto a = randn(T, {3, 1});
-    auto b = randn(T, {5});
-    std::vector<int64_t> expanded_sizes = {3, 5};
-    ASSERT((a + b).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes)));
+  TestOut3Basic(T);
+  TestOut3WithScalar(T);
+  TestOut3OldFallback(T);
+  TestOut3MismatchedSizes(T);
 
-    // with scalar
-    auto aScalar = ones(T, {1});
-    aScalar.get()->maybeScalar(true);
-    b = randn(T, {3, 5});
-    ASSERT((aScalar + b).equal(aScalar.expand(b.sizes()) + b.expand(b.sizes())));
+  TestIn2Basic(T);
+  TestIn2WithScalar(T);
+  TestIn2ExpandError(T);
 
-    // old fallback behavior yields error
-    {
-      auto a = randn(T, {3, 5});
-      auto b = randn(T, {5, 3});
-      ASSERT_THROWS(a + b);
-    }
+  TestIn3Basic(T);
+  TestIn3WithScalar(T);
+  TestIn3ExpandError(T);
 
-    // with mismatched sizes
-    {
-      auto a = randn(T, {3, 5});
-      auto b = randn(T, {7, 5});
-      ASSERT_THROWS(a + b);
-    }
-  }
-
-  // 2) out-place function with 3 args
-  {
-    // basic
-    auto a = randn(T, {3, 1, 1});
-    auto b = randn(T, {1, 2, 1});
-    auto c = randn(T, {1, 1, 5});
-    std::vector<int64_t> expanded_sizes = {3, 2, 5};
-    ASSERT((a + b + c).equal(a.expand(expanded_sizes) + b.expand(expanded_sizes) + c.expand(expanded_sizes)));
-
-    // with scalar
-    auto aTensorScalar = ones(T, {1});
-    aTensorScalar.get()->maybeScalar(true);
-    b = randn(T, {3, 2, 1});
-    c = randn(T, {1, 2, 5});
-    ASSERT(aTensorScalar.addcmul(b, c).equal(
-           aTensorScalar.expand(expanded_sizes).addcmul(b.expand(expanded_sizes), c.expand(expanded_sizes))));
-
-    // old fallback behavior yields error
-    {
-      auto a = randn(T, {3, 2, 5});
-      auto b = randn(T, {2, 3, 5});
-      auto c = randn(T, {5, 3, 2});
-      ASSERT_THROWS(a.addcmul(b, c));
-    }
-
-    // with mismatched sizes
-    {
-      auto c = randn(T, {5, 5, 5});
-      ASSERT_THROWS(a.addcmul(b, c));
-    }
-  }
-
-  // 3) in-place function with 2 args
-  {
-    // basic
-    auto a = randn(T, {3, 5});
-    auto b = randn(T, {3, 1});
-    ASSERT((a + b).equal(a + b.expand({3, 5})));
-
-    // with scalar
-    auto bScalar = ones(T, {1});
-    bScalar.get()->maybeScalar(true);
-    ASSERT((a + bScalar).equal(a + bScalar.expand(a.sizes())));
-
-    // error: would have to expand inplace arg
-    {
-      auto a = randn(T, {1, 5});
-      auto b = randn(T, {3, 1});
-      ASSERT_THROWS(a.add_(b));
-    }
-  }
-
-  // 4) in-place function with 3 args
-  {
-    // basic
-    auto a = randn(T, {3, 5, 2});
-    auto aClone = a.clone();
-    auto b = randn(T, {3, 1, 2});
-    auto c = randn(T, {1, 5, 1});
-
-    ASSERT(a.addcmul_(b, c).equal(aClone.addcmul_(b.expand(a.sizes()), c.expand(a.sizes()))));
-
-    // with scalar
-    auto bScalar = ones(T, {1});
-    bScalar.get()->maybeScalar(true);
-    ASSERT(a.addcmul_(bScalar, c).equal(aClone.addcmul_(bScalar.expand(a.sizes()), c.expand(a.sizes()))));
-
-    // error: would have to expand inplace arg
-    {
-      auto a = randn(T, {1, 3, 5});
-      auto b = randn(T, {4, 1, 1});
-      auto c = randn(T, {1, 3, 1});
-      ASSERT_THROWS(a.addcmul_(b, c));
-    }
-  }
-
-  // explicit dim specification
-  {
-    // basic
-    auto a = randn(T, {1});
-    auto b = randn(T, {5, 3});
-    auto c = randn(T, {3, 7});
-    ASSERT(a.addmm(b, c).equal(a.expand({5,7}).addmm(b, c)));
-
-    // with scalar
-    Tensor aScalar = ones(T, {1});
-    aScalar.get()->maybeScalar(true);
-    ASSERT(aScalar.addmm(b, c).equal(aScalar.expand({5, 7}).addmm(b, c)));
-
-    // with mismatched sizes
-    {
-      auto a = randn(T, {3, 3});
-      ASSERT_THROWS(a.addmm(b, c));
-    }
-  }
-
-  return 0;
+  TestExplicitDimBasic(T);
+  TestExplicitDimWithScalar(T);
+  TestExplicitDimWithMismatchedSizes(T);
 }
